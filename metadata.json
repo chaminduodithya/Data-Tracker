@@ -1,0 +1,6 @@
+{
+  "name": "Data Tracker",
+  "description": "Monitors daily mobile data usage, download and upload bytes, and hotspot tethering from midnight to current time using NetworkStatsManager.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

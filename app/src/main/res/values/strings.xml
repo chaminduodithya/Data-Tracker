@@ -1,0 +1,4 @@
+<resources>
+    <string name="app_name">Data Tracker</string>
+    <string name="widget_description">Shows real-time daily mobile data, download, upload, and hotspot usage.</string>
+</resources>
