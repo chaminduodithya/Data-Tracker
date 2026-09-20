@@ -26,6 +26,9 @@ jobs:
         with:
           gradle-version: '9.4.1'
 
+      - name: Create google-services.json
+        run: echo '${{ secrets.GOOGLE_SERVICES_JSON }}' | base64 -d > app/google-services.json
+
       - name: Build Debug APK
         run: gradle assembleDebug --no-daemon --no-configuration-cache --stacktrace
 
