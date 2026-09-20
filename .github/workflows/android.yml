@@ -1,8 +1,9 @@
-name: Build Android APK
+name: Android Build & Release APK
 
 on:
   push:
-    branches: [ "main", "master" ]
+    tags:
+      - 'v*'
   workflow_dispatch:
 
 jobs:
@@ -10,24 +11,36 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout Repository
+      - name: Checkout Code
         uses: actions/checkout@v4
 
       - name: Set up JDK 17
         uses: actions/setup-java@v4
         with:
+          distribution: 'zulu'
           java-version: '17'
-          distribution: 'temurin'
-          cache: gradle
+          cache: 'gradle'
 
-      - name: Make Gradle Executable
+      - name: Grant Execute Permission for Gradlew
         run: chmod +x gradlew
 
       - name: Build Debug APK
-        run: ./gradlew assembleDebug
+        run: ./gradlew assembleDebug --stacktrace
 
-      - name: Upload APK Artifact
+      - name: Upload APK as Build Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: DailyDataTracker-APK
+          name: DailyDataTracker-Debug-APK
           path: app/build/outputs/apk/debug/*.apk
+
+      - name: Create GitHub Release
+        if: startsWith(github.ref, 'refs/tags/') || github.event_name == 'workflow_dispatch'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name || 'v1.0.0-debug' }}
+          name: "Data Tracker Release ${{ github.ref_name || 'v1.0.0' }}"
+          draft: false
+          prerelease: false
+          files: app/build/outputs/apk/debug/*.apk
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
