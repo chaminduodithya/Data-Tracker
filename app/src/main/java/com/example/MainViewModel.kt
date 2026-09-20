@@ -1,169 +1,136 @@
 package com.example
 
 import android.app.Application
-import android.content.Intent
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import java.text.SimpleDateFormat
 
-/**
- * UI State for Daily Mobile Data Tracker.
- */
 data class DataUsageUiState(
     val isLoading: Boolean = false,
+    val networkFilter: NetworkFilter = NetworkFilter.CELLULAR_SIM1,
+    val billingCycle: String = "DAILY", // DAILY, WEEKLY, MONTHLY
+    val planAllowanceBytes: Long = 6L * 1024L * 1024L * 1024L,
+    val totalUsageBytes: Long = 0L,
+    val unifiedReport: DataUsageReport? = null,
+    val appUsageList: List<AppUsageInfo> = emptyList(),
+    val hourlyTimeline: List<HourlyUsageBucket> = emptyList(),
+    val historicalData: List<DateTotalProjection> = emptyList(),
+    val liveSpeed: LiveSpeedInfo = LiveSpeedInfo(0L, 0L),
     val hasUsageAccess: Boolean = false,
     val hasPhoneStatePermission: Boolean = false,
-    val dataUsage: DailyMobileDataUsage = DailyMobileDataUsage(),
-    val dailyLimitBytes: Long = 2L * 1024L * 1024L * 1024L, // Default 2.0 GB daily threshold
-    val lastUpdatedMillis: Long = 0L,
-    val errorMessage: String? = null
+    val isRolloverEnabled: Boolean = false,
+    val selectedApp: AppUsageInfo? = null
 ) {
-    /**
-     * Progress proportion relative to daily limit (clamped between 0f and 1f).
-     */
-    val usageProgress: Float
-        get() = if (dailyLimitBytes > 0) {
-            (dataUsage.totalBytes.toFloat() / dailyLimitBytes.toFloat()).coerceIn(0f, 1f)
-        } else {
-            0f
-        }
-
-    /**
-     * Download percentage of total consumed data.
-     */
-    val downloadPercent: Int
-        get() = if (dataUsage.totalBytes > 0) {
-            ((dataUsage.rxBytes.toDouble() / dataUsage.totalBytes.toDouble()) * 100).toInt()
-        } else {
-            0
-        }
-
-    /**
-     * Upload percentage of total consumed data.
-     */
-    val uploadPercent: Int
-        get() = if (dataUsage.totalBytes > 0) {
-            ((dataUsage.txBytes.toDouble() / dataUsage.totalBytes.toDouble()) * 100).toInt()
-        } else {
-            0
-        }
-
-    /**
-     * Tethering percentage of total consumed data.
-     */
-    val tetheringPercent: Int
-        get() = if (dataUsage.totalBytes > 0) {
-            ((dataUsage.tetheringTotalBytes.toDouble() / dataUsage.totalBytes.toDouble()) * 100).toInt()
-        } else {
-            0
-        }
+    val progress: Float
+        get() = if (planAllowanceBytes > 0) (totalUsageBytes.toFloat() / planAllowanceBytes.toFloat()).coerceIn(0f, 1f) else 0f
 }
 
-/**
- * MainViewModel for handling permission checks, midnight timestamp logic, and exposing UI state.
- */
 class MainViewModel(application: Application) : AndroidViewModel(application) {
-
     private val dataUsageManager = DataUsageManager(application)
+    private val database = AppDatabase.getDatabase(application)
+    private val dao = database.appDataUsageDao()
 
     private val _uiState = MutableStateFlow(DataUsageUiState(isLoading = true))
     val uiState: StateFlow<DataUsageUiState> = _uiState.asStateFlow()
 
     init {
-        checkPermissionsAndLoad()
+        checkPermissions()
+        startLiveSpeedTracker()
+        loadHistoricalData()
     }
 
-    /**
-     * Evaluates system permissions and initiates data loading if authorized.
-     */
-    fun checkPermissionsAndLoad() {
+    private fun checkPermissions() {
+        _uiState.update { it.copy(
+            hasUsageAccess = dataUsageManager.hasUsageAccessPermission(),
+            hasPhoneStatePermission = dataUsageManager.hasPhoneStatePermission()
+        )}
+    }
+
+    fun startLiveSpeedTracker() {
         viewModelScope.launch {
-            val hasUsage = dataUsageManager.hasUsageAccessPermission()
-            val hasPhoneState = dataUsageManager.hasPhoneStatePermission()
-
-            _uiState.update { current ->
-                current.copy(
-                    hasUsageAccess = hasUsage,
-                    hasPhoneStatePermission = hasPhoneState
-                )
+            while (true) {
+                val speed = dataUsageManager.getLiveSpeed()
+                _uiState.update { it.copy(liveSpeed = speed) }
+                delay(1000)
             }
+        }
+    }
 
-            if (hasUsage) {
-                loadUsageData()
+    fun refresh() {
+        viewModelScope.launch {
+            _uiState.update { it.copy(isLoading = true) }
+            checkPermissions()
+            if (_uiState.value.hasUsageAccess) {
+                loadUsage()
             } else {
                 _uiState.update { it.copy(isLoading = false) }
             }
         }
     }
 
-    /**
-     * Queries NetworkStatsManager asynchronously on Dispatchers.IO.
-     */
-    fun refresh() {
+    fun updateFilter(filter: NetworkFilter) {
+        _uiState.update { it.copy(networkFilter = filter) }
+        refresh()
+    }
+
+    fun updateBillingCycle(cycle: String) {
+        _uiState.update { it.copy(billingCycle = cycle) }
+        refresh()
+    }
+
+    private suspend fun loadUsage() = withContext(Dispatchers.IO) {
+        val midnight = dataUsageManager.getStartOfDayMidnightMillis()
+        val now = System.currentTimeMillis()
+        
+        val total = dataUsageManager.getTotalUsage(_uiState.value.networkFilter, midnight, now)
+        val perApp = dataUsageManager.getPerAppUsage(_uiState.value.networkFilter, midnight, now)
+        val unified = dataUsageManager.getUnifiedUsageReport(_uiState.value.networkFilter)
+        val timeline = dataUsageManager.getHourlyUsageTimeline(_uiState.value.networkFilter)
+        
+        // Cache current app usage in Room for daily history
+        val dateStr = SimpleDateFormat("yyyy-MM-dd", java.util.Locale.getDefault()).format(java.util.Date())
+        val entities = perApp.take(10).map { app ->
+            AppDataUsageEntity(
+                packageName = app.packageName,
+                dateString = dateStr,
+                foregroundBytes = app.foregroundBytes,
+                backgroundBytes = app.backgroundBytes,
+                totalBytes = app.totalBytes,
+                networkType = _uiState.value.networkFilter.name
+            )
+        }
+        dao.insertAll(entities)
+
+        _uiState.update { it.copy(
+            totalUsageBytes = total,
+            appUsageList = perApp,
+            unifiedReport = unified,
+            hourlyTimeline = timeline,
+            isLoading = false
+        )}
+    }
+
+    fun selectApp(app: AppUsageInfo?) {
+        _uiState.update { it.copy(selectedApp = app) }
+    }
+
+    private fun loadHistoricalData() {
         viewModelScope.launch {
-            _uiState.update { it.copy(isLoading = true, errorMessage = null) }
-            val hasUsage = dataUsageManager.hasUsageAccessPermission()
-            val hasPhoneState = dataUsageManager.hasPhoneStatePermission()
-
-            if (!hasUsage) {
-                _uiState.update {
-                    it.copy(
-                        isLoading = false,
-                        hasUsageAccess = false,
-                        hasPhoneStatePermission = hasPhoneState
-                    )
-                }
-                return@launch
-            }
-
-            loadUsageData()
-        }
-    }
-
-    private suspend fun loadUsageData() {
-        try {
-            val usage = withContext(Dispatchers.IO) {
-                dataUsageManager.getDailyMobileDataUsage()
-            }
-            _uiState.update { current ->
-                current.copy(
-                    isLoading = false,
-                    dataUsage = usage,
-                    lastUpdatedMillis = System.currentTimeMillis(),
-                    errorMessage = null
-                )
-            }
-            // Notify home screen widget to refresh its views with latest stats
-            DailyDataAppWidgetProvider.sendRefreshBroadcast(getApplication())
-        } catch (e: Exception) {
-            _uiState.update { current ->
-                current.copy(
-                    isLoading = false,
-                    errorMessage = e.localizedMessage ?: "Failed to read network stats"
-                )
+            dao.getHistoricalTotals(7).collect { totals ->
+                _uiState.update { it.copy(historicalData = totals) }
             }
         }
     }
 
-    /**
-     * Updates daily data allowance limit for progress gauge calculations.
-     */
-    fun setDailyLimit(bytes: Long) {
-        if (bytes > 0) {
-            _uiState.update { it.copy(dailyLimitBytes = bytes) }
-        }
-    }
-
-    /**
-     * Provides navigation intent for Usage Access Settings.
-     */
-    fun getUsageAccessSettingsIntent(): Intent {
-        return dataUsageManager.getUsageAccessSettingsIntent()
+    fun toggleRollover(enabled: Boolean) {
+        _uiState.update { it.copy(isRolloverEnabled = enabled) }
     }
 }

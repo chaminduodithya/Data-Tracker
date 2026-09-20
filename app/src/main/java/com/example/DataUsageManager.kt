@@ -9,10 +9,12 @@ import android.content.Intent
 import android.content.pm.PackageManager
 import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
+import android.net.TrafficStats
 import android.net.Uri
 import android.os.Build
 import android.os.Process
 import android.provider.Settings
+import android.telephony.SubscriptionManager
 import android.telephony.TelephonyManager
 import androidx.core.content.ContextCompat
 import java.text.SimpleDateFormat
@@ -20,213 +22,131 @@ import java.util.Calendar
 import java.util.Date
 import java.util.Locale
 
-/**
- * Data model representing daily mobile data consumption metrics.
- */
-data class DailyMobileDataUsage(
-    val rxBytes: Long = 0L,
-    val txBytes: Long = 0L,
-    val totalBytes: Long = 0L,
-    val tetheringRxBytes: Long = 0L,
-    val tetheringTxBytes: Long = 0L,
-    val tetheringTotalBytes: Long = 0L,
-    val startTimeMillis: Long = 0L,
-    val endTimeMillis: Long = 0L,
-    val isCellularConnected: Boolean = false,
-    val carrierName: String? = null
+enum class NetworkFilter {
+    CELLULAR_SIM1,
+    CELLULAR_SIM2,
+    WIFI
+}
+
+data class AppUsageInfo(
+    val packageName: String,
+    val appName: String,
+    val uid: Int,
+    val foregroundBytes: Long,
+    val backgroundBytes: Long,
+    val totalBytes: Long,
+    val icon: android.graphics.drawable.Drawable? = null
 )
 
-/**
- * Helper class wrapping NetworkStatsManager queries and system permission checks.
- */
+data class LiveSpeedInfo(
+    val downloadSpeedBytesPerSec: Long,
+    val uploadSpeedBytesPerSec: Long
+)
+
+data class DataUsageReport(
+    val totalBytes: Long,
+    val rxBytes: Long,
+    val txBytes: Long,
+    val backgroundBytes: Long,
+    val foregroundBytes: Long,
+    val topAppName: String,
+    val topAppIcon: android.graphics.drawable.Drawable?,
+    val topAppUsage: Long,
+    val bgPercentage: Float,
+    val isCellular: Boolean,
+    val carrierName: String?,
+    val dailyLimitBytes: Long = 6L * 1024L * 1024L * 1024L // Updated to 6.0 GB
+)
+
+data class HourlyUsageBucket(
+    val hourLabel: String,
+    val bytes: Long
+)
+
 class DataUsageManager(private val context: Context) {
 
     private val networkStatsManager: NetworkStatsManager? by lazy {
         context.getSystemService(Context.NETWORK_STATS_SERVICE) as? NetworkStatsManager
     }
 
-    /**
-     * Checks whether the user has granted Usage Data Access (PACKAGE_USAGE_STATS).
-     */
     fun hasUsageAccessPermission(): Boolean {
-        val appOps = context.getSystemService(Context.APP_OPS_SERVICE) as? AppOpsManager
-            ?: return false
+        val appOps = context.getSystemService(Context.APP_OPS_SERVICE) as? AppOpsManager ?: return false
         val mode = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            appOps.unsafeCheckOpNoThrow(
-                AppOpsManager.OPSTR_GET_USAGE_STATS,
-                Process.myUid(),
-                context.packageName
-            )
+            appOps.unsafeCheckOpNoThrow(AppOpsManager.OPSTR_GET_USAGE_STATS, Process.myUid(), context.packageName)
         } else {
             @Suppress("DEPRECATION")
-            appOps.checkOpNoThrow(
-                AppOpsManager.OPSTR_GET_USAGE_STATS,
-                Process.myUid(),
-                context.packageName
-            )
+            appOps.checkOpNoThrow(AppOpsManager.OPSTR_GET_USAGE_STATS, Process.myUid(), context.packageName)
         }
         return mode == AppOpsManager.MODE_ALLOWED
     }
 
-    /**
-     * Checks whether READ_PHONE_STATE permission is granted.
-     */
     fun hasPhoneStatePermission(): Boolean {
-        return ContextCompat.checkSelfPermission(
-            context,
-            Manifest.permission.READ_PHONE_STATE
-        ) == PackageManager.PERMISSION_GRANTED
+        return ContextCompat.checkSelfPermission(context, Manifest.permission.READ_PHONE_STATE) == PackageManager.PERMISSION_GRANTED
     }
 
-    /**
-     * Creates an Intent to navigate the user to Usage Access Settings.
-     */
     fun getUsageAccessSettingsIntent(): Intent {
         val intent = Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS).apply {
-            // Attempt to point directly to this application's settings if supported
             data = Uri.parse("package:${context.packageName}")
             flags = Intent.FLAG_ACTIVITY_NEW_TASK
         }
-        // Verify that the package-specific intent can resolve; if not, fallback to general usage settings
-        val canResolve = intent.resolveActivity(context.packageManager) != null
-        return if (canResolve) {
+        return if (intent.resolveActivity(context.packageManager) != null) {
             intent
         } else {
-            Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS).apply {
-                flags = Intent.FLAG_ACTIVITY_NEW_TASK
-            }
+            Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS).apply { flags = Intent.FLAG_ACTIVITY_NEW_TASK }
         }
     }
 
-    /**
-     * Calculates the start time of the current calendar day at 00:00:00.000 AM.
-     */
     fun getStartOfDayMidnightMillis(): Long {
-        val calendar = Calendar.getInstance().apply {
+        return Calendar.getInstance().apply {
             set(Calendar.HOUR_OF_DAY, 0)
             set(Calendar.MINUTE, 0)
             set(Calendar.SECOND, 0)
             set(Calendar.MILLISECOND, 0)
-        }
-        return calendar.timeInMillis
+        }.timeInMillis
+    }
+
+    fun getStartOfWeekMillis(): Long {
+        return Calendar.getInstance().apply {
+            set(Calendar.DAY_OF_WEEK, firstDayOfWeek)
+            set(Calendar.HOUR_OF_DAY, 0)
+            set(Calendar.MINUTE, 0)
+            set(Calendar.SECOND, 0)
+            set(Calendar.MILLISECOND, 0)
+        }.timeInMillis
+    }
+
+    fun getStartOfMonthMillis(anchorDate: Int = 1): Long {
+        return Calendar.getInstance().apply {
+            val maxDay = getActualMaximum(Calendar.DAY_OF_MONTH)
+            val targetDay = anchorDate.coerceIn(1, maxDay)
+            set(Calendar.DAY_OF_MONTH, targetDay)
+            set(Calendar.HOUR_OF_DAY, 0)
+            set(Calendar.MINUTE, 0)
+            set(Calendar.SECOND, 0)
+            set(Calendar.MILLISECOND, 0)
+            if (timeInMillis > System.currentTimeMillis()) {
+                add(Calendar.MONTH, -1)
+            }
+        }.timeInMillis
     }
 
     /**
-     * Queries daily mobile data usage between midnight and currentTimeMillis.
+     * Gets subscriber ID for a given SIM slot. Returns null if not found or unauthorized.
      */
-    fun getDailyMobileDataUsage(): DailyMobileDataUsage {
-        val startTime = getStartOfDayMidnightMillis()
-        val endTime = System.currentTimeMillis()
-
-        val nsm = networkStatsManager
-            ?: return DailyMobileDataUsage(
-                startTimeMillis = startTime,
-                endTimeMillis = endTime
-            )
-
-        val subscriberId = getSubscriberId()
-        var rx = 0L
-        var tx = 0L
-
-        // Query total mobile device traffic summary
-        try {
-            val bucket = nsm.querySummaryForDevice(
-                ConnectivityManager.TYPE_MOBILE,
-                subscriberId,
-                startTime,
-                endTime
-            )
-            rx = bucket.rxBytes.coerceAtLeast(0L)
-            tx = bucket.txBytes.coerceAtLeast(0L)
-        } catch (e: Exception) {
-            // If subscriberId was used and failed, retry with null subscriberId
-            if (subscriberId != null) {
-                try {
-                    val bucket = nsm.querySummaryForDevice(
-                        ConnectivityManager.TYPE_MOBILE,
-                        null,
-                        startTime,
-                        endTime
-                    )
-                    rx = bucket.rxBytes.coerceAtLeast(0L)
-                    tx = bucket.txBytes.coerceAtLeast(0L)
-                } catch (_: Exception) {
-                    // Ignore and keep 0L
-                }
-            }
-        }
-
-        // Query Hotspot & Tethering traffic using UID_TETHERING (-5)
-        var tetheringRx = 0L
-        var tetheringTx = 0L
-
-        try {
-            val tetheringStats = nsm.queryDetailsForUid(
-                ConnectivityManager.TYPE_MOBILE,
-                subscriberId,
-                startTime,
-                endTime,
-                NetworkStats.Bucket.UID_TETHERING
-            )
-            val tBucket = NetworkStats.Bucket()
-            while (tetheringStats.hasNextBucket()) {
-                tetheringStats.getNextBucket(tBucket)
-                tetheringRx += tBucket.rxBytes.coerceAtLeast(0L)
-                tetheringTx += tBucket.txBytes.coerceAtLeast(0L)
-            }
-            tetheringStats.close()
-        } catch (_: Exception) {
-            // Fallback: iterate querySummary if queryDetailsForUid fails
-            try {
-                val summaryStats = nsm.querySummary(
-                    ConnectivityManager.TYPE_MOBILE,
-                    subscriberId,
-                    startTime,
-                    endTime
-                )
-                val sBucket = NetworkStats.Bucket()
-                while (summaryStats.hasNextBucket()) {
-                    summaryStats.getNextBucket(sBucket)
-                    if (sBucket.uid == NetworkStats.Bucket.UID_TETHERING) {
-                        tetheringRx += sBucket.rxBytes.coerceAtLeast(0L)
-                        tetheringTx += sBucket.txBytes.coerceAtLeast(0L)
-                    }
-                }
-                summaryStats.close()
-            } catch (_: Exception) {
-                // Ignore if unavailable
-            }
-        }
-
-        val total = rx + tx
-        val tetheringTotal = tetheringRx + tetheringTx
-        val isCellular = isCellularNetworkActive()
-        val carrier = getCarrierName()
-
-        return DailyMobileDataUsage(
-            rxBytes = rx,
-            txBytes = tx,
-            totalBytes = total,
-            tetheringRxBytes = tetheringRx,
-            tetheringTxBytes = tetheringTx,
-            tetheringTotalBytes = tetheringTotal,
-            startTimeMillis = startTime,
-            endTimeMillis = endTime,
-            isCellularConnected = isCellular,
-            carrierName = carrier
-        )
-    }
-
-    private fun getSubscriberId(): String? {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            // Android 10+ requires null for carrier-agnostic device queries
-            return null
-        }
+    @Suppress("MissingPermission", "DEPRECATION")
+    private fun getSubscriberIdForSlot(slotIndex: Int): String? {
+        if (!hasPhoneStatePermission()) return null
         return try {
-            if (hasPhoneStatePermission()) {
-                val telephonyManager = context.getSystemService(Context.TELEPHONY_SERVICE) as? TelephonyManager
-                @Suppress("DEPRECATION")
-                telephonyManager?.subscriberId
+            val sm = context.getSystemService(Context.TELEPHONY_SUBSCRIPTION_SERVICE) as? SubscriptionManager
+            val activeList = sm?.activeSubscriptionInfoList
+            if (activeList != null && slotIndex < activeList.size) {
+                val info = activeList[slotIndex]
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                    null // Android 10+ restricts subscriberId for privacy, fallback to standard device query
+                } else {
+                    val tm = context.getSystemService(Context.TELEPHONY_SERVICE) as? TelephonyManager
+                    tm?.createForSubscriptionId(info.subscriptionId)?.subscriberId
+                }
             } else {
                 null
             }
@@ -235,31 +155,240 @@ class DataUsageManager(private val context: Context) {
         }
     }
 
-    private fun isCellularNetworkActive(): Boolean {
+    /**
+     * Queries total usage for the specified filter and time window.
+     */
+    fun getTotalUsage(filter: NetworkFilter, startTime: Long, endTime: Long): Long {
+        val nsm = networkStatsManager ?: return 0L
+        val networkType = when (filter) {
+            NetworkFilter.WIFI -> ConnectivityManager.TYPE_WIFI
+            else -> ConnectivityManager.TYPE_MOBILE
+        }
+        val subscriberId = when (filter) {
+            NetworkFilter.CELLULAR_SIM1 -> getSubscriberIdForSlot(0)
+            NetworkFilter.CELLULAR_SIM2 -> getSubscriberIdForSlot(1)
+            else -> null
+        }
+
         return try {
-            val cm = context.getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager
-            val activeNetwork = cm?.activeNetwork ?: return false
-            val capabilities = cm.getNetworkCapabilities(activeNetwork) ?: return false
-            capabilities.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR)
-        } catch (_: Exception) {
-            false
+            val bucket = nsm.querySummaryForDevice(networkType, subscriberId, startTime, endTime)
+            bucket.rxBytes + bucket.txBytes
+        } catch (e: Exception) {
+            // Fallback retry if subscriberId query fails
+            if (networkType == ConnectivityManager.TYPE_MOBILE) {
+                try {
+                    val bucket = nsm.querySummaryForDevice(networkType, null, startTime, endTime)
+                    bucket.rxBytes + bucket.txBytes
+                } catch (_: Exception) {
+                    0L
+                }
+            } else {
+                0L
+            }
         }
     }
 
-    private fun getCarrierName(): String? {
-        return try {
-            val telephonyManager = context.getSystemService(Context.TELEPHONY_SERVICE) as? TelephonyManager
-            val name = telephonyManager?.networkOperatorName
-            if (!name.isNullOrBlank()) name else telephonyManager?.simOperatorName
-        } catch (_: Exception) {
-            null
+    /**
+     * Queries detailed per-app consumption (foreground vs background) sorted descending by total usage.
+     */
+    fun getPerAppUsage(filter: NetworkFilter, startTime: Long, endTime: Long): List<AppUsageInfo> {
+        val nsm = networkStatsManager ?: return emptyList()
+        val networkType = when (filter) {
+            NetworkFilter.WIFI -> ConnectivityManager.TYPE_WIFI
+            else -> ConnectivityManager.TYPE_MOBILE
         }
+        val subscriberId = when (filter) {
+            NetworkFilter.CELLULAR_SIM1 -> getSubscriberIdForSlot(0)
+            NetworkFilter.CELLULAR_SIM2 -> getSubscriberIdForSlot(1)
+            else -> null
+        }
+
+        val pm = context.packageManager
+        val installedApps = pm.getInstalledApplications(PackageManager.GET_META_DATA)
+        val uidMap = mutableMapOf<Int, Pair<Long, Long>>() // uid -> Pair(foregroundBytes, backgroundBytes)
+
+        try {
+            // Query detailed summaries for all UIDs on the specified network type
+            val stats = nsm.querySummary(networkType, subscriberId, startTime, endTime)
+            val bucket = NetworkStats.Bucket()
+            while (stats.hasNextBucket()) {
+                stats.getNextBucket(bucket)
+                val uid = bucket.uid
+                val rx = bucket.rxBytes.coerceAtLeast(0L)
+                val tx = bucket.txBytes.coerceAtLeast(0L)
+                val bytes = rx + tx
+
+                val currentPair = uidMap.getOrDefault(uid, Pair(0L, 0L))
+                if (bucket.state == NetworkStats.Bucket.STATE_FOREGROUND) {
+                    uidMap[uid] = Pair(currentPair.first + bytes, currentPair.second)
+                } else {
+                    uidMap[uid] = Pair(currentPair.first, currentPair.second + bytes)
+                }
+            }
+            stats.close()
+        } catch (_: Exception) { }
+
+        val appUsageList = mutableListOf<AppUsageInfo>()
+        val seenUids = mutableSetOf<Int>()
+
+        for (app in installedApps) {
+            val uid = app.uid
+            if (uid < 10000) continue // Skip system UIDs usually
+            
+            val pair = uidMap[uid] ?: continue
+            if (pair.first + pair.second <= 0) continue
+
+            // Only add unique UIDs to avoid duplicates in the list for apps that share UIDs
+            if (seenUids.contains(uid)) continue
+            seenUids.add(uid)
+
+            val appName = pm.getApplicationLabel(app).toString()
+            val packageName = app.packageName
+            val icon = try { pm.getApplicationIcon(app) } catch (_: Exception) { null }
+
+            appUsageList.add(
+                AppUsageInfo(
+                    packageName = packageName,
+                    appName = appName,
+                    uid = uid,
+                    foregroundBytes = pair.first,
+                    backgroundBytes = pair.second,
+                    totalBytes = pair.first + pair.second,
+                    icon = icon
+                )
+            )
+        }
+
+        // Group by application packages to handle multiple apps sharing the same UID if needed, or sort directly
+        return appUsageList.sortedByDescending { it.totalBytes }
+    }
+
+    /**
+     * Unified data-fetching function to be used by both the App and the Widget.
+     * Ensures strict 00:00:00 AM start time and identical filtering logic.
+     */
+    fun getUnifiedUsageReport(filter: NetworkFilter): DataUsageReport {
+        val midnight = getStartOfDayMidnightMillis()
+        val now = System.currentTimeMillis()
+
+        val total = getTotalUsage(filter, midnight, now)
+        val appList = getPerAppUsage(filter, midnight, now)
+        
+        val topApp = appList.firstOrNull()
+        val totalBackground = appList.sumOf { it.backgroundBytes }
+        val totalForeground = appList.sumOf { it.foregroundBytes }
+        
+        val bgPercent = if (total > 0) (totalBackground.toFloat() / total.toFloat()) else 0f
+        
+        // Simple cellular check
+        val cm = context.getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager
+        val isCell = cm?.activeNetwork?.let { 
+            cm.getNetworkCapabilities(it)?.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR) 
+        } ?: false
+
+        val tm = context.getSystemService(Context.TELEPHONY_SERVICE) as? TelephonyManager
+        val carrier = tm?.networkOperatorName
+
+        return DataUsageReport(
+            totalBytes = total,
+            rxBytes = appList.sumOf { it.foregroundBytes + it.backgroundBytes },
+            txBytes = 0L,
+            backgroundBytes = totalBackground,
+            foregroundBytes = totalForeground,
+            topAppName = topApp?.appName ?: "None",
+            topAppIcon = topApp?.icon,
+            topAppUsage = topApp?.totalBytes ?: 0L,
+            bgPercentage = bgPercent,
+            isCellular = isCell,
+            carrierName = carrier,
+            dailyLimitBytes = 6L * 1024L * 1024L * 1024L
+        )
+    }
+
+    /**
+     * Queries NetworkStatsManager in 1-hour interval buckets from midnight.
+     */
+    fun getHourlyUsageTimeline(filter: NetworkFilter): List<HourlyUsageBucket> {
+        val nsm = networkStatsManager ?: return emptyList()
+        val networkType = when (filter) {
+            NetworkFilter.WIFI -> ConnectivityManager.TYPE_WIFI
+            else -> ConnectivityManager.TYPE_MOBILE
+        }
+        val subscriberId = when (filter) {
+            NetworkFilter.CELLULAR_SIM1 -> getSubscriberIdForSlot(0)
+            NetworkFilter.CELLULAR_SIM2 -> getSubscriberIdForSlot(1)
+            else -> null
+        }
+
+        val startOfDay = getStartOfDayMidnightMillis()
+        val currentTime = System.currentTimeMillis()
+        val buckets = mutableListOf<HourlyUsageBucket>()
+
+        val calendar = Calendar.getInstance()
+        calendar.timeInMillis = startOfDay
+
+        val timeFormatter = SimpleDateFormat("h a", Locale.US)
+
+        while (calendar.timeInMillis < currentTime) {
+            val startTime = calendar.timeInMillis
+            calendar.add(Calendar.HOUR_OF_DAY, 1)
+            val endTime = calendar.timeInMillis.coerceAtMost(currentTime)
+
+            var hourlyBytes = 0L
+            try {
+                val bucket = nsm.querySummaryForDevice(networkType, subscriberId, startTime, endTime)
+                hourlyBytes = bucket.rxBytes + bucket.txBytes
+            } catch (_: Exception) {
+                // Retry if subscriberId was used
+                if (subscriberId != null) {
+                    try {
+                        val bucket = nsm.querySummaryForDevice(networkType, null, startTime, endTime)
+                        hourlyBytes = bucket.rxBytes + bucket.txBytes
+                    } catch (_: Exception) {}
+                }
+            }
+
+            buckets.add(HourlyUsageBucket(timeFormatter.format(Date(startTime)), hourlyBytes))
+        }
+        return buckets
+    }
+
+    /**
+     * Calculates instant download/upload speed by sampling TrafficStats.
+     */
+    private var lastRxBytes: Long = 0L
+    private var lastTxBytes: Long = 0L
+    private var lastSpeedTimeMillis: Long = 0L
+
+    fun getLiveSpeed(): LiveSpeedInfo {
+        val currentRx = TrafficStats.getTotalRxBytes()
+        val currentTx = TrafficStats.getTotalTxBytes()
+        val currentTime = System.currentTimeMillis()
+
+        if (lastSpeedTimeMillis == 0L) {
+            lastRxBytes = currentRx
+            lastTxBytes = currentTx
+            lastSpeedTimeMillis = currentTime
+            return LiveSpeedInfo(0L, 0L)
+        }
+
+        val timeDiffSec = (currentTime - lastSpeedTimeMillis) / 1000.0
+        if (timeDiffSec <= 0) return LiveSpeedInfo(0L, 0L)
+
+        val rxDiff = (currentRx - lastRxBytes).coerceAtLeast(0L)
+        val txDiff = (currentTx - lastTxBytes).coerceAtLeast(0L)
+
+        lastRxBytes = currentRx
+        lastTxBytes = currentTx
+        lastSpeedTimeMillis = currentTime
+
+        return LiveSpeedInfo(
+            downloadSpeedBytesPerSec = (rxDiff / timeDiffSec).toLong(),
+            uploadSpeedBytesPerSec = (txDiff / timeDiffSec).toLong()
+        )
     }
 
     companion object {
-        /**
-         * Formats bytes into human-readable string with 2 decimal places (e.g. 12.34 MB).
-         */
         fun formatBytes(bytes: Long): String {
             if (bytes <= 0) return "0.00 MB"
             val units = arrayOf("B", "KB", "MB", "GB", "TB")
@@ -268,9 +397,6 @@ class DataUsageManager(private val context: Context) {
             return String.format(Locale.US, "%.2f %s", value, units[digitGroups])
         }
 
-        /**
-         * Returns value and unit separately (e.g. "1.45" and "GB") for large typography styling.
-         */
         fun formatParts(bytes: Long): Pair<String, String> {
             if (bytes <= 0) return Pair("0.00", "MB")
             val units = arrayOf("B", "KB", "MB", "GB", "TB")
@@ -279,21 +405,21 @@ class DataUsageManager(private val context: Context) {
             return Pair(String.format(Locale.US, "%.2f", value), units[digitGroups])
         }
 
-        /**
-         * Formats timestamp into readable time string (e.g., "12:00 AM" or "02:30 PM").
-         */
-        fun formatTime(millis: Long): String {
-            if (millis <= 0) return "--:--"
-            val sdf = SimpleDateFormat("hh:mm a", Locale.getDefault())
+        fun formatSpeed(bytesPerSec: Long): String {
+            if (bytesPerSec <= 0) return "0.0 B/s"
+            val units = arrayOf("B/s", "KB/s", "MB/s", "GB/s")
+            val digitGroups = (Math.log10(bytesPerSec.toDouble()) / Math.log10(1024.0)).toInt().coerceIn(0, units.size - 1)
+            val value = bytesPerSec / Math.pow(1024.0, digitGroups.toDouble())
+            return String.format(Locale.US, "%.1f %s", value, units[digitGroups])
+        }
+
+        fun formatDate(millis: Long): String {
+            val sdf = SimpleDateFormat("EEEE, MMM d", Locale.getDefault())
             return sdf.format(Date(millis))
         }
 
-        /**
-         * Formats timestamp into readable date string (e.g., "Tuesday, Sep 15").
-         */
-        fun formatDate(millis: Long): String {
-            if (millis <= 0) return ""
-            val sdf = SimpleDateFormat("EEEE, MMM d", Locale.getDefault())
+        fun formatTime(millis: Long): String {
+            val sdf = SimpleDateFormat("hh:mm a", Locale.getDefault())
             return sdf.format(Date(millis))
         }
     }

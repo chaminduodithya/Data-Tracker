@@ -8,6 +8,8 @@
         tools:ignore="ProtectedPermissions" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <uses-permission android:name="android.permission.QUERY_ALL_PACKAGES" tools:ignore="QueryAllPackagesPermission" />
 
     <application
         android:allowBackup="true"
@@ -31,15 +33,15 @@
         </activity>
 
         <receiver
-            android:name=".DailyDataAppWidgetProvider"
-            android:exported="true">
+            android:name=".DataTrackerWidgetReceiver"
+            android:exported="true"
+            android:label="Data Tracker Glance Widget">
             <intent-filter>
                 <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
-                <action android:name="com.example.ACTION_REFRESH_DATA_WIDGET" />
             </intent-filter>
             <meta-data
                 android:name="android.appwidget.provider"
-                android:resource="@xml/widget_daily_data_info" />
+                android:resource="@xml/data_tracker_widget_info" />
         </receiver>
     </application>
 
