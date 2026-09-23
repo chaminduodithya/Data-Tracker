@@ -22,6 +22,6 @@ dependencyResolutionManagement {
   }
 }
 
-rootProject.name = "Data Tracker"
+rootProject.name = "ByteWatch"
 
 include(":app")

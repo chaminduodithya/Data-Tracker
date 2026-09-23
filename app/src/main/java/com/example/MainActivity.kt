@@ -91,7 +91,7 @@ class MainActivity : ComponentActivity() {
                             },
                             text = {
                                 Text(
-                                    text = "To monitor daily mobile data, trigger over-limit alerts, and display per-app consumption, Data Tracker requires Usage Access permission in Android Settings.",
+                                    text = "To monitor daily mobile data, trigger over-limit alerts, and display per-app consumption, ByteWatch requires Usage Access permission in Android Settings.",
                                     style = MaterialTheme.typography.bodyMedium,
                                     textAlign = TextAlign.Center,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant

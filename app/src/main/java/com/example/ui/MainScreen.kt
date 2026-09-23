@@ -73,7 +73,7 @@ fun MainScreen(viewModel: MainViewModel) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Image(
                             painter = painterResource(id = R.drawable.app_logo),
-                            contentDescription = "Data Tracker Logo",
+                            contentDescription = "ByteWatch Logo",
                             modifier = Modifier
                                 .size(32.dp)
                                 .clip(CircleShape)
