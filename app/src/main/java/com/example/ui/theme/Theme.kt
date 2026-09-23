@@ -64,3 +64,14 @@ fun MyApplicationTheme(
         content = content
     )
 }
+
+@Composable
+fun SamsungTheme(
+    darkTheme: Boolean = isSystemInDarkTheme(),
+    dynamicColor: Boolean = false,
+    content: @Composable () -> Unit
+) = MyApplicationTheme(
+    darkTheme = darkTheme,
+    dynamicColor = dynamicColor,
+    content = content
+)
