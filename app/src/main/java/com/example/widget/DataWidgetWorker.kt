@@ -6,11 +6,12 @@ import android.content.Context
 import android.net.ConnectivityManager
 import android.os.Build
 import android.os.Process
-import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.longPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.glance.appwidget.GlanceAppWidgetManager
+import androidx.glance.appwidget.state.getAppWidgetState
 import androidx.glance.appwidget.state.updateAppWidgetState
+import androidx.glance.state.PreferencesGlanceStateDefinition
 import androidx.work.Constraints
 import androidx.work.CoroutineWorker
 import androidx.work.ExistingPeriodicWorkPolicy
@@ -102,7 +103,7 @@ class DataWidgetWorker(
 
     override suspend fun doWork(): Result {
         val manager = DataUsageManager(appContext)
-        val prefs = DataTrackerPrefs(appContext)
+        val dataPrefs = DataTrackerPrefs(appContext)
         val hasUsageAccess = checkUsageAccessPermission()
 
         val glanceManager = GlanceAppWidgetManager(appContext)
@@ -118,14 +119,10 @@ class DataWidgetWorker(
 
         for (glanceId in glanceIds) {
             try {
-                var targetType = "SIM1"
-                var layoutStyle = "FULL"
-
-                updateAppWidgetState(appContext, glanceId) { state: Preferences ->
-                    targetType = state[TARGET_KEY] ?: "SIM1"
-                    layoutStyle = state[LAYOUT_STYLE_KEY] ?: "FULL"
-                    state
-                }
+                // Safely READ current Glance state
+                val currentState = getAppWidgetState(appContext, PreferencesGlanceStateDefinition, glanceId)
+                val targetType = currentState[TARGET_KEY] ?: "SIM1"
+                val layoutStyle = currentState[LAYOUT_STYLE_KEY] ?: "FULL"
 
                 @Suppress("DEPRECATION")
                 val networkType = if (targetType == "WIFI") ConnectivityManager.TYPE_WIFI else ConnectivityManager.TYPE_MOBILE
@@ -137,10 +134,10 @@ class DataWidgetWorker(
                 }
 
                 val limit = when (targetType) {
-                    "SIM1" -> prefs.sim1DailyLimit.first()
-                    "SIM2" -> prefs.sim2DailyLimit.first()
-                    "WIFI" -> prefs.wifiDailyLimit.first()
-                    else -> prefs.sim1DailyLimit.first()
+                    "SIM1" -> dataPrefs.sim1DailyLimit.first()
+                    "SIM2" -> dataPrefs.sim2DailyLimit.first()
+                    "WIFI" -> dataPrefs.wifiDailyLimit.first()
+                    else -> dataPrefs.sim1DailyLimit.first()
                 }
 
                 var totalBytes = 0L
@@ -162,8 +159,9 @@ class DataWidgetWorker(
                     } catch (_: Exception) {}
                 }
 
-                updateAppWidgetState(appContext, glanceId) { state ->
-                    val mutable = state.toMutablePreferences()
+                // WRITE updated values to Glance state
+                updateAppWidgetState(appContext, PreferencesGlanceStateDefinition, glanceId) { prefs ->
+                    val mutable = prefs.toMutablePreferences()
                     mutable[USED_BYTES_KEY] = totalBytes
                     mutable[LIMIT_BYTES_KEY] = limit
                     mutable[DISPLAY_LABEL_KEY] = displayLabel

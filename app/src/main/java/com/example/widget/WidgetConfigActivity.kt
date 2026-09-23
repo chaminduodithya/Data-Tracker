@@ -16,20 +16,17 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.glance.appwidget.GlanceAppWidgetManager
 import androidx.glance.appwidget.state.updateAppWidgetState
+import androidx.glance.state.PreferencesGlanceStateDefinition
 import androidx.lifecycle.lifecycleScope
-import com.example.ui.theme.SamsungTheme
 import kotlinx.coroutines.launch
+import com.example.ui.theme.SamsungTheme
 
 class WidgetConfigActivity : ComponentActivity() {
-
-    companion object {
-        val LAYOUT_DENSITY_KEY = stringPreferencesKey("layout_density") // "FULL", "GAUGE_SPEED", "GAUGE_ONLY"
-    }
 
     private var appWidgetId = AppWidgetManager.INVALID_APPWIDGET_ID
 
@@ -53,16 +50,23 @@ class WidgetConfigActivity : ComponentActivity() {
         }
     }
 
-    private fun saveAndFinish(target: String, layoutDensity: String) {
+    private fun saveAndFinish(target: String, layoutStyle: String) {
         lifecycleScope.launch {
             if (appWidgetId != AppWidgetManager.INVALID_APPWIDGET_ID) {
                 val glanceManager = GlanceAppWidgetManager(this@WidgetConfigActivity)
                 val glanceId = glanceManager.getGlanceIdBy(appWidgetId)
 
-                updateAppWidgetState(this@WidgetConfigActivity, glanceId) { prefs ->
+                val displayLabel = when (target) {
+                    "WIFI" -> "Wi-Fi Network"
+                    "SIM2" -> "SIM 2 • Mobile"
+                    else -> "SIM 1 • Mobile"
+                }
+
+                updateAppWidgetState(this@WidgetConfigActivity, PreferencesGlanceStateDefinition, glanceId) { prefs ->
                     val mutable = prefs.toMutablePreferences()
                     mutable[DataWidgetWorker.TARGET_KEY] = target
-                    mutable[LAYOUT_DENSITY_KEY] = layoutDensity
+                    mutable[DataWidgetWorker.LAYOUT_STYLE_KEY] = layoutStyle
+                    mutable[DataWidgetWorker.DISPLAY_LABEL_KEY] = displayLabel
                     mutable
                 }
 
@@ -115,7 +119,7 @@ fun WidgetConfigScreen(
 
                 Spacer(Modifier.height(8.dp))
                 Text(
-                    text = "Configure data source target and layout density for your Home Screen widget.",
+                    text = "Configure data source target and layout style for your Home Screen widget.",
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -142,21 +146,36 @@ fun WidgetConfigScreen(
                                 onClick = { selectedTarget = "SIM1" },
                                 shape = SegmentedButtonDefaults.itemShape(index = 0, count = 3)
                             ) {
-                                Text("SIM 1")
+                                Text(
+                                    text = "SIM 1",
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                    modifier = Modifier.padding(horizontal = 4.dp)
+                                )
                             }
                             SegmentedButton(
                                 selected = selectedTarget == "SIM2",
                                 onClick = { selectedTarget = "SIM2" },
                                 shape = SegmentedButtonDefaults.itemShape(index = 1, count = 3)
                             ) {
-                                Text("SIM 2")
+                                Text(
+                                    text = "SIM 2",
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                    modifier = Modifier.padding(horizontal = 4.dp)
+                                )
                             }
                             SegmentedButton(
                                 selected = selectedTarget == "WIFI",
                                 onClick = { selectedTarget = "WIFI" },
                                 shape = SegmentedButtonDefaults.itemShape(index = 2, count = 3)
                             ) {
-                                Text("Wi-Fi")
+                                Text(
+                                    text = "Wi-Fi",
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                    modifier = Modifier.padding(horizontal = 4.dp)
+                                )
                             }
                         }
                     }
@@ -184,21 +203,36 @@ fun WidgetConfigScreen(
                                 onClick = { selectedLayout = "FULL" },
                                 shape = SegmentedButtonDefaults.itemShape(index = 0, count = 3)
                             ) {
-                                Text("Gauge + Apps")
+                                Text(
+                                    text = "Gauge + Apps",
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                    modifier = Modifier.padding(horizontal = 4.dp)
+                                )
                             }
                             SegmentedButton(
                                 selected = selectedLayout == "GAUGE_SPEED",
                                 onClick = { selectedLayout = "GAUGE_SPEED" },
                                 shape = SegmentedButtonDefaults.itemShape(index = 1, count = 3)
                             ) {
-                                Text("Gauge + Speed")
+                                Text(
+                                    text = "Gauge + Speed",
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                    modifier = Modifier.padding(horizontal = 4.dp)
+                                )
                             }
                             SegmentedButton(
                                 selected = selectedLayout == "GAUGE_ONLY",
                                 onClick = { selectedLayout = "GAUGE_ONLY" },
                                 shape = SegmentedButtonDefaults.itemShape(index = 2, count = 3)
                             ) {
-                                Text("Gauge Only")
+                                Text(
+                                    text = "Gauge Only",
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                    modifier = Modifier.padding(horizontal = 4.dp)
+                                )
                             }
                         }
                     }

@@ -21,6 +21,7 @@ import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.DataUsageManager
@@ -44,6 +45,11 @@ fun HistoryScreen(viewModel: MainViewModel) {
 
     val historyData = uiState.historyList // List<Pair<Long, Long>> (timestamp -> bytes)
     val isBits = uiState.unitPreference == UnitPreference.BITS_BYTES
+
+    // Compute maxUsageBytes across all daily items
+    val maxUsageBytes = remember(historyData) {
+        historyData.maxOfOrNull { it.second }?.coerceAtLeast(1L) ?: 1L
+    }
 
     // Comparison calculations
     val todayBytes = historyData.lastOrNull()?.second ?: 0L
@@ -89,14 +95,24 @@ fun HistoryScreen(viewModel: MainViewModel) {
                             onClick = { selectedNetworkType = ConnectivityManager.TYPE_MOBILE },
                             shape = SegmentedButtonDefaults.itemShape(index = 0, count = 2)
                         ) {
-                            Text("Mobile Data")
+                            Text(
+                                text = "Mobile Data",
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                                modifier = Modifier.padding(horizontal = 4.dp)
+                            )
                         }
                         SegmentedButton(
                             selected = selectedNetworkType == ConnectivityManager.TYPE_WIFI,
                             onClick = { selectedNetworkType = ConnectivityManager.TYPE_WIFI },
                             shape = SegmentedButtonDefaults.itemShape(index = 1, count = 2)
                         ) {
-                            Text("Wi-Fi")
+                            Text(
+                                text = "Wi-Fi",
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                                modifier = Modifier.padding(horizontal = 4.dp)
+                            )
                         }
                     }
 
@@ -108,14 +124,24 @@ fun HistoryScreen(viewModel: MainViewModel) {
                             onClick = { selectedDays = 7 },
                             shape = SegmentedButtonDefaults.itemShape(index = 0, count = 2)
                         ) {
-                            Text("Last 7 Days")
+                            Text(
+                                text = "Last 7 Days",
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                                modifier = Modifier.padding(horizontal = 4.dp)
+                            )
                         }
                         SegmentedButton(
                             selected = selectedDays == 30,
                             onClick = { selectedDays = 30 },
                             shape = SegmentedButtonDefaults.itemShape(index = 1, count = 2)
                         ) {
-                            Text("Last 30 Days")
+                            Text(
+                                text = "Last 30 Days",
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                                modifier = Modifier.padding(horizontal = 4.dp)
+                            )
                         }
                     }
                 }
@@ -156,7 +182,7 @@ fun HistoryScreen(viewModel: MainViewModel) {
                         }
                     }
 
-                    Divider(modifier = Modifier.padding(vertical = 12.dp), color = MaterialTheme.colorScheme.surfaceVariant)
+                    HorizontalDivider(modifier = Modifier.padding(vertical = 12.dp), color = MaterialTheme.colorScheme.surfaceVariant)
 
                     Row(
                         modifier = Modifier.fillMaxWidth(),
@@ -193,7 +219,11 @@ fun HistoryScreen(viewModel: MainViewModel) {
                     )
                     Spacer(Modifier.height(16.dp))
 
-                    InteractiveCanvasBarChart(historyData = historyData, isBits = isBits)
+                    InteractiveCanvasBarChart(
+                        historyData = historyData,
+                        maxUsageBytes = maxUsageBytes,
+                        isBits = isBits
+                    )
                 }
             }
         }
@@ -213,7 +243,7 @@ fun HistoryScreen(viewModel: MainViewModel) {
             DailyLogItem(
                 timestamp = timestamp,
                 bytes = bytes,
-                peakBytes = peakItem?.second ?: 1L,
+                maxUsageBytes = maxUsageBytes,
                 isBits = isBits
             )
         }
@@ -227,6 +257,7 @@ fun HistoryScreen(viewModel: MainViewModel) {
 @Composable
 fun InteractiveCanvasBarChart(
     historyData: List<Pair<Long, Long>>,
+    maxUsageBytes: Long,
     isBits: Boolean = false
 ) {
     if (historyData.isEmpty()) {
@@ -239,10 +270,6 @@ fun InteractiveCanvasBarChart(
             Text("No history logs available yet", style = MaterialTheme.typography.bodyMedium)
         }
         return
-    }
-
-    val maxBytes = remember(historyData) {
-        historyData.maxOfOrNull { it.second }?.coerceAtLeast(1L) ?: 1L
     }
 
     var selectedIndex by remember { mutableIntStateOf(-1) }
@@ -302,7 +329,7 @@ fun InteractiveCanvasBarChart(
 
                 for (i in 0 until count) {
                     val bytes = historyData[i].second
-                    val heightRatio = (bytes.toDouble() / maxBytes.toDouble()).toFloat().coerceIn(0.03f, 1.0f)
+                    val heightRatio = (bytes.toDouble() / maxUsageBytes.toDouble()).toFloat().coerceIn(0.02f, 1.0f)
                     val barHeight = size.height * heightRatio
                     val x = i * barWidthPx + spacingPx / 2
                     val y = size.height - barHeight
@@ -356,11 +383,11 @@ fun InteractiveCanvasBarChart(
 fun DailyLogItem(
     timestamp: Long,
     bytes: Long,
-    peakBytes: Long,
+    maxUsageBytes: Long,
     isBits: Boolean = false
 ) {
     val dateStr = SimpleDateFormat("EEEE, MMM d", Locale.US).format(Date(timestamp))
-    val ratio = (bytes.toDouble() / peakBytes.toDouble().coerceAtLeast(1.0)).toFloat().coerceIn(0f, 1f)
+    val ratio = (bytes.toDouble() / maxUsageBytes.toDouble().coerceAtLeast(1.0)).toFloat().coerceIn(0f, 1f)
 
     Card(
         modifier = Modifier.fillMaxWidth(),

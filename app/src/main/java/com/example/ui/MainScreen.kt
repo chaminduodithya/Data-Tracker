@@ -25,7 +25,9 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.graphics.drawable.toBitmap
@@ -33,6 +35,7 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.example.*
+import com.example.R
 import com.example.data.UnitPreference
 import com.example.ui.components.UsageGauge
 import com.example.ui.theme.DownloadColor
@@ -67,15 +70,25 @@ fun MainScreen(viewModel: MainViewModel) {
         topBar = {
             TopAppBar(
                 title = {
-                    Text(
-                        when (selectedTab) {
-                            0 -> "Data Overview"
-                            1 -> "Usage History"
-                            else -> "Configuration"
-                        },
-                        fontWeight = FontWeight.Bold,
-                        style = MaterialTheme.typography.titleLarge
-                    )
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Image(
+                            painter = painterResource(id = R.drawable.app_logo),
+                            contentDescription = "Data Tracker Logo",
+                            modifier = Modifier
+                                .size(32.dp)
+                                .clip(CircleShape)
+                        )
+                        Spacer(Modifier.width(12.dp))
+                        Text(
+                            when (selectedTab) {
+                                0 -> "Data Overview"
+                                1 -> "Usage History"
+                                else -> "Configuration"
+                            },
+                            fontWeight = FontWeight.Bold,
+                            style = MaterialTheme.typography.titleLarge
+                        )
+                    }
                 },
                 actions = {
                     if (selectedTab == 0) {
@@ -163,6 +176,10 @@ fun OverviewTabContent(
     val context = LocalContext.current
     val isBits = uiState.unitPreference == UnitPreference.BITS_BYTES
 
+    val maxAppUsageBytes = remember(uiState.filteredAppUsageList) {
+        uiState.filteredAppUsageList.maxOfOrNull { it.totalBytes }?.coerceAtLeast(1L) ?: 1L
+    }
+
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
         contentPadding = PaddingValues(16.dp),
@@ -193,20 +210,32 @@ fun OverviewTabContent(
                         SegmentedButton(
                             selected = uiState.selectedNetworkType == ConnectivityManager.TYPE_MOBILE,
                             onClick = { viewModel.setNetworkType(ConnectivityManager.TYPE_MOBILE) },
-                            shape = SegmentedButtonDefaults.itemShape(index = 0, count = 2)
+                            shape = SegmentedButtonDefaults.itemShape(index = 0, count = 2),
+                            icon = {
+                                SegmentedButtonDefaults.Icon(active = uiState.selectedNetworkType == ConnectivityManager.TYPE_MOBILE)
+                            }
                         ) {
-                            Icon(Icons.Default.SignalCellularAlt, contentDescription = null, modifier = Modifier.size(18.dp))
-                            Spacer(Modifier.width(6.dp))
-                            Text("Mobile")
+                            Text(
+                                text = "Mobile",
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                                modifier = Modifier.padding(horizontal = 4.dp)
+                            )
                         }
                         SegmentedButton(
                             selected = uiState.selectedNetworkType == ConnectivityManager.TYPE_WIFI,
                             onClick = { viewModel.setNetworkType(ConnectivityManager.TYPE_WIFI) },
-                            shape = SegmentedButtonDefaults.itemShape(index = 1, count = 2)
+                            shape = SegmentedButtonDefaults.itemShape(index = 1, count = 2),
+                            icon = {
+                                SegmentedButtonDefaults.Icon(active = uiState.selectedNetworkType == ConnectivityManager.TYPE_WIFI)
+                            }
                         ) {
-                            Icon(Icons.Default.Wifi, contentDescription = null, modifier = Modifier.size(18.dp))
-                            Spacer(Modifier.width(6.dp))
-                            Text("Wi-Fi")
+                            Text(
+                                text = "Wi-Fi",
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                                modifier = Modifier.padding(horizontal = 4.dp)
+                            )
                         }
                     }
 
@@ -252,7 +281,8 @@ fun OverviewTabContent(
                     UsageGauge(
                         usedBytes = uiState.dataUsage.totalBytes,
                         limitBytes = uiState.activeLimit,
-                        isBits = isBits
+                        isBits = isBits,
+                        rolloverMessage = uiState.rolloverMessage
                     )
                 }
             }
@@ -424,6 +454,7 @@ fun OverviewTabContent(
         items(uiState.filteredAppUsageList) { app ->
             AppUsageItemCard(
                 app = app,
+                maxUsageBytes = maxAppUsageBytes,
                 isBits = isBits,
                 onClick = { viewModel.selectAppForDetail(app) }
             )
@@ -438,11 +469,13 @@ fun OverviewTabContent(
 @Composable
 fun AppUsageItemCard(
     app: AppUsageInfo,
+    maxUsageBytes: Long,
     isBits: Boolean = false,
     onClick: () -> Unit
 ) {
-    val totalBytes = app.totalBytes.coerceAtLeast(1L)
-    val bgRatio = app.backgroundBytes.toDouble() / totalBytes.toDouble()
+    val totalBytes = app.totalBytes.coerceAtLeast(0L)
+    val progressRatio = (totalBytes.toDouble() / maxUsageBytes.toDouble().coerceAtLeast(1.0)).toFloat().coerceIn(0f, 1f)
+    val bgRatio = app.backgroundBytes.toDouble() / totalBytes.toDouble().coerceAtLeast(1.0)
     val isHighBgUsage = bgRatio > 0.20
 
     Card(
@@ -452,86 +485,98 @@ fun AppUsageItemCard(
         shape = RoundedCornerShape(18.dp),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
     ) {
-        Row(
-            modifier = Modifier
-                .padding(16.dp)
-                .fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            if (app.icon != null) {
-                val bitmap = remember(app.icon) { app.icon.toBitmap().asImageBitmap() }
-                Image(
-                    bitmap = bitmap,
-                    contentDescription = app.appName,
-                    modifier = Modifier
-                        .size(44.dp)
-                        .clip(CircleShape)
-                )
-            } else {
-                Box(
-                    modifier = Modifier
-                        .size(44.dp)
-                        .clip(CircleShape)
-                        .background(MaterialTheme.colorScheme.primaryContainer),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Icon(Icons.Default.Android, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
-                }
-            }
-
-            Spacer(Modifier.width(16.dp))
-
-            Column(modifier = Modifier.weight(1f)) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(
-                        app.appName,
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.Bold,
-                        maxLines = 1
+        Column(modifier = Modifier.padding(16.dp)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                if (app.icon != null) {
+                    val bitmap = remember(app.icon) { app.icon.toBitmap().asImageBitmap() }
+                    Image(
+                        bitmap = bitmap,
+                        contentDescription = app.appName,
+                        modifier = Modifier
+                            .size(44.dp)
+                            .clip(CircleShape)
                     )
-
-                    if (isHighBgUsage) {
-                        Spacer(Modifier.width(6.dp))
-                        Box(
-                            modifier = Modifier
-                                .clip(RoundedCornerShape(6.dp))
-                                .background(Color(0xFFFF3B30).copy(alpha = 0.15f))
-                                .padding(horizontal = 6.dp, vertical = 2.dp)
-                        ) {
-                            Text(
-                                "High BG",
-                                style = MaterialTheme.typography.labelSmall,
-                                color = Color(0xFFFF3B30),
-                                fontWeight = FontWeight.Bold
-                            )
-                        }
+                } else {
+                    Box(
+                        modifier = Modifier
+                            .size(44.dp)
+                            .clip(CircleShape)
+                            .background(MaterialTheme.colorScheme.primaryContainer),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(Icons.Default.Android, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
                     }
                 }
 
-                Spacer(Modifier.height(2.dp))
-                Text(
-                    "FG: ${DataUsageManager.formatBytes(app.foregroundBytes, isBits)}  •  BG: ${DataUsageManager.formatBytes(app.backgroundBytes, isBits)}",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
+                Spacer(Modifier.width(16.dp))
+
+                Column(modifier = Modifier.weight(1f)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(
+                            app.appName,
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.Bold,
+                            maxLines = 1
+                        )
+
+                        if (isHighBgUsage) {
+                            Spacer(Modifier.width(6.dp))
+                            Box(
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(6.dp))
+                                    .background(Color(0xFFFF3B30).copy(alpha = 0.15f))
+                                    .padding(horizontal = 6.dp, vertical = 2.dp)
+                            ) {
+                                Text(
+                                    "High BG",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = Color(0xFFFF3B30),
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
+                        }
+                    }
+
+                    Spacer(Modifier.height(2.dp))
+                    Text(
+                        "FG: ${DataUsageManager.formatBytes(app.foregroundBytes, isBits)}  •  BG: ${DataUsageManager.formatBytes(app.backgroundBytes, isBits)}",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+
+                Spacer(Modifier.width(12.dp))
+
+                Column(horizontalAlignment = Alignment.End) {
+                    Text(
+                        DataUsageManager.formatBytes(app.totalBytes, isBits),
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Black,
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                    Icon(
+                        Icons.Default.ChevronRight,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.size(18.dp)
+                    )
+                }
             }
 
-            Spacer(Modifier.width(12.dp))
+            Spacer(Modifier.height(10.dp))
 
-            Column(horizontalAlignment = Alignment.End) {
-                Text(
-                    DataUsageManager.formatBytes(app.totalBytes, isBits),
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.Black,
-                    color = MaterialTheme.colorScheme.primary
-                )
-                Icon(
-                    Icons.Default.ChevronRight,
-                    contentDescription = null,
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.size(18.dp)
-                )
-            }
+            LinearProgressIndicator(
+                progress = { progressRatio },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(6.dp)
+                    .clip(RoundedCornerShape(3.dp)),
+                color = MaterialTheme.colorScheme.primary,
+                trackColor = MaterialTheme.colorScheme.surfaceVariant
+            )
         }
     }
 }

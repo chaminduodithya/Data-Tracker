@@ -16,6 +16,7 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.MainViewModel
@@ -52,6 +53,7 @@ fun SettingsScreen(viewModel: MainViewModel) {
     var selectedUnit by remember(uiState.unitPreference) { mutableStateOf(uiState.unitPreference) }
     var selectedTheme by remember(uiState.themePreference) { mutableStateOf(uiState.themePreference) }
     var notificationsEnabled by remember(uiState.notificationsEnabled) { mutableStateOf(uiState.notificationsEnabled) }
+    var rolloverEnabled by remember(uiState.rolloverEnabled) { mutableStateOf(uiState.rolloverEnabled) }
 
     LazyColumn(
         modifier = Modifier
@@ -158,14 +160,24 @@ fun SettingsScreen(viewModel: MainViewModel) {
                         onClick = { selectedUnit = UnitPreference.MB_GB },
                         shape = SegmentedButtonDefaults.itemShape(index = 0, count = 2)
                     ) {
-                        Text("Bytes (MB / GB)")
+                        Text(
+                            text = "Bytes (MB / GB)",
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.padding(horizontal = 4.dp)
+                        )
                     }
                     SegmentedButton(
                         selected = selectedUnit == UnitPreference.BITS_BYTES,
                         onClick = { selectedUnit = UnitPreference.BITS_BYTES },
                         shape = SegmentedButtonDefaults.itemShape(index = 1, count = 2)
                     ) {
-                        Text("Bits (Mb / Gb)")
+                        Text(
+                            text = "Bits (Mb / Gb)",
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.padding(horizontal = 4.dp)
+                        )
                     }
                 }
 
@@ -183,21 +195,36 @@ fun SettingsScreen(viewModel: MainViewModel) {
                         onClick = { selectedTheme = AppThemePreference.SYSTEM },
                         shape = SegmentedButtonDefaults.itemShape(index = 0, count = 3)
                     ) {
-                        Text("System")
+                        Text(
+                            text = "System",
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.padding(horizontal = 4.dp)
+                        )
                     }
                     SegmentedButton(
                         selected = selectedTheme == AppThemePreference.LIGHT,
                         onClick = { selectedTheme = AppThemePreference.LIGHT },
                         shape = SegmentedButtonDefaults.itemShape(index = 1, count = 3)
                     ) {
-                        Text("Light")
+                        Text(
+                            text = "Light",
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.padding(horizontal = 4.dp)
+                        )
                     }
                     SegmentedButton(
                         selected = selectedTheme == AppThemePreference.DARK,
                         onClick = { selectedTheme = AppThemePreference.DARK },
                         shape = SegmentedButtonDefaults.itemShape(index = 2, count = 3)
                     ) {
-                        Text("Dark")
+                        Text(
+                            text = "Dark",
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.padding(horizontal = 4.dp)
+                        )
                     }
                 }
             }
@@ -231,6 +258,34 @@ fun SettingsScreen(viewModel: MainViewModel) {
             }
         }
 
+        // --- Data Rollover Card ---
+        item {
+            SettingsCard(title = "Data Rollover & Audit", icon = Icons.Default.Savings) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = "Carry Over Unused Daily Data",
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                        Text(
+                            text = "Unused data from previous days is saved into a rollover pool. Exceeding daily limit automatically draws from this pool.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    Switch(
+                        checked = rolloverEnabled,
+                        onCheckedChange = { rolloverEnabled = it }
+                    )
+                }
+            }
+        }
+
         // --- Save Settings Button ---
         item {
             Button(
@@ -252,7 +307,8 @@ fun SettingsScreen(viewModel: MainViewModel) {
                         anchorDay = anchorDay.toInt(),
                         unitPref = selectedUnit,
                         themePref = selectedTheme,
-                        notifications = notificationsEnabled
+                        notifications = notificationsEnabled,
+                        rollover = rolloverEnabled
                     )
 
                     Toast.makeText(context, "Settings saved successfully!", Toast.LENGTH_SHORT).show()

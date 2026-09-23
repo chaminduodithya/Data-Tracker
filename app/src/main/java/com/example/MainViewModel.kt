@@ -56,6 +56,11 @@ data class DataUsageUiState(
     val unitPreference: UnitPreference = UnitPreference.MB_GB,
     val themePreference: AppThemePreference = AppThemePreference.SYSTEM,
     val notificationsEnabled: Boolean = true,
+    val rolloverEnabled: Boolean = true,
+
+    // Rollover Audit Pool
+    val accumulatedRolloverBytes: Long = 0L,
+    val rolloverMessage: String = "",
 
     // Filter Controls
     val appSearchQuery: String = "",
@@ -136,14 +141,16 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 prefs.anchorDay,
                 prefs.unitPreference,
                 prefs.themePreference,
-                prefs.notificationsEnabled
-            ) { anchor, unit, theme, notifs ->
+                prefs.notificationsEnabled,
+                prefs.rolloverEnabled
+            ) { anchor, unit, theme, notifs, rollover ->
                 _uiState.update { current ->
                     current.copy(
                         anchorDay = anchor,
                         unitPreference = unit,
                         themePreference = theme,
-                        notificationsEnabled = notifs
+                        notificationsEnabled = notifs,
+                        rolloverEnabled = rollover
                     )
                 }
             }.collect()
@@ -258,7 +265,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         anchorDay: Int,
         unitPref: UnitPreference,
         themePref: AppThemePreference,
-        notifications: Boolean
+        notifications: Boolean,
+        rollover: Boolean = true
     ) {
         viewModelScope.launch {
             prefs.setSim1DailyLimit(sim1Daily)
@@ -271,6 +279,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             prefs.setUnitPreference(unitPref)
             prefs.setThemePreference(themePref)
             prefs.setNotificationsEnabled(notifications)
+            prefs.setRolloverEnabled(rollover)
 
             refresh()
         }
@@ -332,8 +341,36 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
             val activeCap = determineActiveLimit()
 
-            // Forecast calculations
+            // Rollover audit pool calculation
+            val isWifi = netType == ConnectivityManager.TYPE_WIFI
+            val dailyCap = if (isWifi) _uiState.value.wifiDailyLimit else _uiState.value.sim1DailyLimit
             val isBits = _uiState.value.unitPreference == UnitPreference.BITS_BYTES
+
+            val rolloverPool = withContext(Dispatchers.IO) {
+                dataUsageManager.calculateRolloverPool(netType, subId, dailyCap, 30)
+            }
+
+            val todayUsage = usage.totalBytes
+            val rolloverMsg = if (todayUsage <= dailyCap) {
+                if (rolloverPool > 0) {
+                    "You can use an extra ${DataUsageManager.formatBytes(rolloverPool, isBits)} left from previous days"
+                } else {
+                    "No rollover data available from previous days"
+                }
+            } else {
+                val excess = todayUsage - dailyCap
+                if (rolloverPool >= excess) {
+                    val remainingPool = rolloverPool - excess
+                    "Over today's daily limit by ${DataUsageManager.formatBytes(excess, isBits)} (covered by rollover pool). ${DataUsageManager.formatBytes(remainingPool, isBits)} rollover balance remaining."
+                } else if (rolloverPool > 0) {
+                    val uncovered = excess - rolloverPool
+                    "Exceeded daily limit by ${DataUsageManager.formatBytes(excess, isBits)}. Rollover pool covered ${DataUsageManager.formatBytes(rolloverPool, isBits)} (${DataUsageManager.formatBytes(uncovered, isBits)} over limit)."
+                } else {
+                    "Exceeded daily limit by ${DataUsageManager.formatBytes(excess, isBits)} (no rollover balance left)."
+                }
+            }
+
+            // Forecast calculations
             val elapsedMs = (endTime - startTime).coerceAtLeast(1000L)
             val calNow = Calendar.getInstance()
 
@@ -358,6 +395,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     dataUsage = usage,
                     appUsageList = appList,
                     activeLimit = activeCap,
+                    accumulatedRolloverBytes = rolloverPool,
+                    rolloverMessage = rolloverMsg,
                     paceEndString = forecastPaceStr,
                     remainingTodayString = remainingTodayStr,
                     lastUpdatedMillis = System.currentTimeMillis(),

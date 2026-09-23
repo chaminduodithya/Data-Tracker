@@ -46,7 +46,7 @@ private val LightColorScheme = lightColorScheme(
 @Composable
 fun MyApplicationTheme(
     darkTheme: Boolean = isSystemInDarkTheme(),
-    dynamicColor: Boolean = false, // Use intentional themed colors for brand identity
+    dynamicColor: Boolean = false,
     content: @Composable () -> Unit
 ) {
     val colorScheme = when {
@@ -63,4 +63,12 @@ fun MyApplicationTheme(
         typography = Typography,
         content = content
     )
+}
+
+@Composable
+fun SamsungTheme(
+    darkTheme: Boolean = isSystemInDarkTheme(),
+    content: @Composable () -> Unit
+) {
+    MyApplicationTheme(darkTheme = darkTheme, content = content)
 }

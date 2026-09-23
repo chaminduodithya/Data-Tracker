@@ -510,6 +510,34 @@ class DataUsageManager(private val context: Context) {
     }
 
     /**
+     * Calculates accumulated leftover rollover data across past completed days.
+     * For each past day d:
+     *   surplus = (dailyLimitBytes - dayBytes)
+     * Sums all surplus/deficit across past days to determine available rollover pool.
+     */
+    fun calculateRolloverPool(
+        networkType: Int,
+        subscriberId: String?,
+        dailyLimitBytes: Long,
+        daysToAudit: Int = 30
+    ): Long {
+        if (dailyLimitBytes <= 0) return 0L
+        val history = getDailyUsageHistory(networkType, subscriberId, daysToAudit)
+        if (history.size <= 1) return 0L
+
+        // Exclude today (the last entry in history)
+        val pastDays = history.dropLast(1)
+        var accumulatedPool = 0L
+
+        for ((_, dayBytes) in pastDays) {
+            val daySurplus = dailyLimitBytes - dayBytes
+            accumulatedPool += daySurplus
+        }
+
+        return accumulatedPool.coerceAtLeast(0L)
+    }
+
+    /**
      * Calculates the start time millis for the current monthly billing cycle based on anchor reset day.
      */
     fun calculateMonthlyStartMillis(anchorDay: Int): Long {

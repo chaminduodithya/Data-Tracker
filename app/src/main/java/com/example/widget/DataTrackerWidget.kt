@@ -59,6 +59,7 @@ class DataTrackerWidget : GlanceAppWidget() {
             val top3Bytes = prefs[DataWidgetWorker.TOP_APP_3_BYTES] ?: 0L
 
             val size = LocalSize.current
+            val isExpanded = size.width >= 200.dp && layoutStyle != "GAUGE_ONLY"
 
             WidgetRoot(
                 context = context,
@@ -72,7 +73,7 @@ class DataTrackerWidget : GlanceAppWidget() {
                 top2Bytes = top2Bytes,
                 top3Name = top3Name,
                 top3Bytes = top3Bytes,
-                isExpanded = size.width >= 200.dp && layoutStyle != "GAUGE_ONLY"
+                isExpanded = isExpanded
             )
         }
     }
@@ -199,7 +200,7 @@ class DataTrackerWidget : GlanceAppWidget() {
                     )
                 }
 
-                // Expanded Layout Section (Rendered when isExpanded is true and layoutStyle != "GAUGE_ONLY")
+                // Expanded Layout Section (Only shown if isExpanded is true and layoutStyle is NOT "GAUGE_ONLY")
                 if (isExpanded && layoutStyle != "GAUGE_ONLY") {
                     Spacer(GlanceModifier.height(10.dp))
                     Text(
