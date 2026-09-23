@@ -4,6 +4,7 @@ import android.appwidget.AppWidgetManager
 import android.content.ComponentName
 import android.content.Context
 import androidx.test.core.app.ApplicationProvider
+import com.example.widget.WidgetReceiver
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
@@ -49,13 +50,13 @@ class ExampleRobolectricTest {
     @Test
     fun `widget provider is properly defined and instantiable`() {
         val context = ApplicationProvider.getApplicationContext<Context>()
-        val provider = DailyDataAppWidgetProvider()
+        val provider = WidgetReceiver()
         assertNotNull(provider)
 
         val appWidgetManager = AppWidgetManager.getInstance(context)
         assertNotNull(appWidgetManager)
 
-        val componentName = ComponentName(context, DailyDataAppWidgetProvider::class.java)
+        val componentName = ComponentName(context, WidgetReceiver::class.java)
         assertNotNull(componentName)
     }
 }

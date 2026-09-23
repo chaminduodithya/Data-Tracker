@@ -40,9 +40,7 @@ android {
       proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
       signingConfig = signingConfigs.getByName("release")
     }
-    debug {
-      signingConfig = signingConfigs.getByName("debug")
-    }
+    debug { }
   }
   compileOptions {
     sourceCompatibility = JavaVersion.VERSION_11
@@ -87,16 +85,13 @@ dependencies {
   implementation(libs.androidx.compose.ui.graphics)
   implementation(libs.androidx.compose.ui.tooling.preview)
   implementation(libs.androidx.core.ktx)
-  // implementation(libs.androidx.datastore.preferences)
+  implementation(libs.androidx.datastore.preferences)
   implementation(libs.androidx.lifecycle.runtime.compose)
   implementation(libs.androidx.lifecycle.runtime.ktx)
   implementation(libs.androidx.lifecycle.viewmodel.compose)
   // implementation(libs.androidx.navigation.compose)
   implementation(libs.androidx.room.ktx)
   implementation(libs.androidx.room.runtime)
-  implementation(libs.androidx.glance.appwidget)
-  implementation(libs.androidx.glance.material3)
-  implementation(libs.accompanist.drawablepainter)
   // implementation(libs.coil.compose)
   implementation(libs.converter.moshi)
   implementation(libs.firebase.ai)
@@ -118,6 +113,9 @@ dependencies {
   implementation(libs.okhttp)
   // implementation(libs.play.services.location)
   implementation(libs.retrofit)
+  implementation(libs.androidx.glance.appwidget)
+  implementation(libs.androidx.glance.material3)
+  implementation(libs.work.runtime.ktx)
   testImplementation(libs.androidx.compose.ui.test.junit4)
   testImplementation(libs.androidx.core)
   testImplementation(libs.androidx.junit)

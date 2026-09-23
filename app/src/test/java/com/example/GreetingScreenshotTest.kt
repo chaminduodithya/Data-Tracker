@@ -24,10 +24,7 @@ class GreetingScreenshotTest {
         composeTestRule.setContent {
             MyApplicationTheme {
                 PrimaryUsageCard(
-                    totalBytes = 1420000000L,
-                    dailyLimitBytes = 2147483648L,
-                    progress = 0.66f,
-                    onSelectLimit = {}
+                    totalBytes = 1420000000L
                 )
             }
         }
